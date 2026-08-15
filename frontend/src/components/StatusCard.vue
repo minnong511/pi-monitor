@@ -18,6 +18,10 @@ defineProps({
     type: String,
     default: 'normal',
   },
+  detail: {
+    type: String,
+    default: '',
+  },
 })
 </script>
 
@@ -29,6 +33,10 @@ defineProps({
       {{ value }}
       <small v-if="unit">{{ unit }}</small>
     </strong>
+
+    <span v-if="detail" class="status-card__detail">
+      {{ detail }}
+    </span>
   </article>
 </template>
 
@@ -58,6 +66,13 @@ defineProps({
   font-weight: 500;
 }
 
+.status-card__detail {
+  display: block;
+  margin-top: 8px;
+  color: #64748b;
+  font-size: 12px;
+}
+
 .status-card--online {
   border-color: #86efac;
   background: #f0fdf4;
@@ -66,5 +81,15 @@ defineProps({
 .status-card--offline {
   border-color: #fecaca;
   background: #fef2f2;
+}
+
+.status-card--warning {
+  border-color: #fca5a5;
+  background: #fff1f2;
+}
+
+.status-card--warning .status-card__value,
+.status-card--warning .status-card__detail {
+  color: #b91c1c;
 }
 </style>
