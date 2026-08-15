@@ -17,7 +17,7 @@ ENV_DIR="/etc/pi-monitor"
 ENV_FILE="${ENV_DIR}/sensor.env"
 
 SERVICE_USER="$(id -un)"
-SERVICE_GROUP="$(id -gn)"
+SERVICE_GROUP="$(id -gn "${SERVICE_USER}")"
 
 API_URL="${PI_MONITOR_API_URL:-http://localhost:8080/api/sensors}"
 SEND_INTERVAL="${PI_MONITOR_SEND_INTERVAL_SECONDS:-5}"
@@ -111,10 +111,10 @@ write_systemd_service() {
         'Type=simple' \
         "User=${SERVICE_USER}" \
         "Group=${SERVICE_GROUP}" \
-        "WorkingDirectory=\"${PROJECT_ROOT}\"" \
+        "WorkingDirectory=${PROJECT_ROOT}" \
         "EnvironmentFile=-${ENV_FILE}" \
         'Environment=PYTHONUNBUFFERED=1' \
-        "ExecStart=\"${VENV_DIR}/bin/python\" \"${SENSOR_SCRIPT}\"" \
+        "ExecStart=${VENV_DIR}/bin/python ${SENSOR_SCRIPT}" \
         'Restart=always' \
         'RestartSec=5' \
         'TimeoutStopSec=15' \
