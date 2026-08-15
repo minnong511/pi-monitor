@@ -195,3 +195,163 @@ psql -h localhost -U pi_monitor -d pi_monitor \
 # Spring Boot 서버 가동 확인
 
 `Started RaspMonitorApplication` 로그를 확인하여 Spring Boot와 PostgreSQL 연결이 정상적으로 완료된 것을 확인했다.
+
+
+# websocket 
+
+cd ~/pi-monitor/backend
+mkdir -p src/main/java/com/raspmonitor/rasp_monitor/config
+nano src/main/java/com/raspmonitor/rasp_monitor/config/WebSocketConfig.java
+
+# Websocket 설정 코드 
+
+package com.raspmonitor.rasp_monitor.config;
+
+import org.springframework.context.annotation.Configuration;
+import org.springframework.messaging.simp.config.MessageBrokerRegistry;
+import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
+import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
+import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
+
+@Configuration
+@EnableWebSocketMessageBroker
+public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
+
+    @Override
+    public void configureMessageBroker(MessageBrokerRegistry registry) {
+        registry.enableSimpleBroker("/topic");
+        registry.setApplicationDestinationPrefixes("/app");
+    }
+
+    @Override
+    public void registerStompEndpoints(StompEndpointRegistry registry) {
+        registry.addEndpoint("/ws");
+    }
+}
+
+# 통신 구조 
+
+WebSocket 연결
+ws://localhost:8080/ws
+
+클라이언트 → 서버 메시지 전송
+/app/sensors
+
+서버 → 구독자 메시지 발행
+/topic/sensors
+
+# 프론트엔드가 다른 포트라면
+
+프론트엔드가 Vite의 http://localhost:5173에서 실행된다면 엔드포인트에 허용 출처를 추가
+
+@Override
+public void registerStompEndpoints(StompEndpointRegistry registry) {
+    registry.addEndpoint("/ws")
+            .setAllowedOrigins("http://localhost:5173");
+}
+
+React 개발 서버가 3000번 포트라면 다음처럼 여러 개를 지정
+
+registry.addEndpoint("/ws")
+        .setAllowedOrigins(
+                "http://localhost:3000",
+                "http://localhost:5173"
+        );
+
+# 테스트 최종 파일구조 
+
+
+backend/src/main/java/com/raspmonitor/rasp_monitor/
+├── config/
+│   └── WebSocketConfig.java
+├── controller/
+├── domain/
+├── dto/
+├── repository/
+└── service/
+
+# 백엔드 최종 테스트 
+Python → POST /api/sensors → DB 저장 → Spring이 /topic/sensors로 발행 → 터미널 구독기
+
+Python 랜덤 센서
+    │ POST /api/sensors
+    ▼
+Spring Controller
+    │
+    ├─ DB 저장
+    │
+    └─ /topic/sensors 발행
+              │
+              ▼
+      Python 터미널 구독기
+
+# 테스트 구조 
+
+┌──────────────────────────┐
+│ random_sensor_sender.py  │
+│ 랜덤 센서 데이터 생성     │
+└────────────┬─────────────┘
+             │ HTTP POST /api/sensors
+             │ JSON 데이터
+             ▼
+┌──────────────────────────┐
+│ SensorDataController     │
+│ 요청 수신 및 검증         │
+└────────────┬─────────────┘
+             │ sensorDataService.create()
+             ▼
+┌──────────────────────────┐
+│ SensorDataService        │
+│ Entity 생성, 트랜잭션 처리 │
+└────────────┬─────────────┘
+             │ repository.save()
+             ▼
+┌──────────────────────────┐
+│ PostgreSQL               │
+│ sensor_data 테이블 저장   │
+└────────────┬─────────────┘
+             │ 저장된 SensorData 반환
+             ▼
+┌──────────────────────────┐
+│ SimpMessagingTemplate    │
+│ /topic/sensors로 발행     │
+└────────────┬─────────────┘
+             │ STOMP MESSAGE
+             ▼
+┌──────────────────────────┐
+│ sensor_subscriber.py     │
+│ 실시간 센서 데이터 출력   │
+└──────────────────────────┘
+
+실제 프론트엔드에서는 이런 구조 사용 
+
+1. GET /api/sensors/latest로 현재 데이터 조회
+2. /ws에 WebSocket 연결
+3. /topic/sensors 구독
+4. 이후 새 데이터가 올 때마다 화면 갱신
+
+REST = 데이터 입력
+PostgreSQL = 데이터 보관
+WebSocket = 새 데이터 실시간 전달
+
+# 보안 
+
+센서 POST 요청
+→ API Key 또는 인증 토큰 검사
+→ 정상 라즈베리파이만 저장 허용
+
+Dashboard GET/WebSocket
+→ 인증된 사용자만 조회 허용
+
+# 라즈베리파이에서 실행할 서비스
+
+postgresql.service
+pi-monitor-backend.service
+pi-monitor-sensor.service
+cloudflared.service
+
+systemctl status postgresql
+systemctl status pi-monitor-backend
+systemctl status pi-monitor-sensor
+systemctl status cloudflared
+
