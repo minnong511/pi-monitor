@@ -13,10 +13,9 @@ public class CorsConfig implements WebMvcConfigurer {
                 .allowedOrigins(
                         "http://localhost:5173",
                         "http://127.0.0.1:5173",
-                        "https://pi-monitor.vercel.app"
+                        "https://monitor-ochre-three.vercel.app"
                 )
                 .allowedMethods("GET", "POST", "OPTIONS")
                 .allowedHeaders("*");
     }
 }
-
