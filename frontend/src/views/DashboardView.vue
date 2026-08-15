@@ -1,5 +1,10 @@
 <script setup>
-import { onMounted, onUnmounted } from 'vue'
+import {
+  computed,
+  onMounted,
+  onUnmounted,
+  ref,
+} from 'vue'
 import { storeToRefs } from 'pinia'
 
 import RecentDataTable from '@/components/RecentDataTable.vue'
@@ -8,6 +13,10 @@ import TemperatureChart from '@/components/TemperatureChart.vue'
 import { useSensorStore } from '@/stores/sensor'
 
 const sensorStore = useSensorStore()
+const TEMPERATURE_WARNING_CELSIUS = 75
+const OFFLINE_TIMEOUT_MS = 20_000
+const currentTime = ref(Date.now())
+let clockTimer = null
 
 const {
   latestSensor,
@@ -20,12 +29,69 @@ function displayNumber(value) {
   return value == null ? '--' : value.toFixed(1)
 }
 
+const lastReceivedTime = computed(() => {
+  const timestamp = latestSensor.value?.createdAt
+
+  if (!timestamp) {
+    return null
+  }
+
+  const time = new Date(timestamp).getTime()
+  return Number.isFinite(time) ? time : null
+})
+
+const lastReceivedAge = computed(() => {
+  if (lastReceivedTime.value == null) {
+    return Number.POSITIVE_INFINITY
+  }
+
+  return Math.max(0, currentTime.value - lastReceivedTime.value)
+})
+
+const isSensorOnline = computed(() => (
+  isConnected.value
+  && lastReceivedAge.value <= OFFLINE_TIMEOUT_MS
+))
+
+const isTemperatureWarning = computed(() => (
+  latestSensor.value?.temperature >= TEMPERATURE_WARNING_CELSIUS
+))
+
+const lastReceivedLabel = computed(() => {
+  if (lastReceivedTime.value == null) {
+    return 'No sensor data received'
+  }
+
+  const seconds = Math.floor(lastReceivedAge.value / 1000)
+
+  if (seconds < 60) {
+    return `Last received ${seconds}s ago`
+  }
+
+  const minutes = Math.floor(seconds / 60)
+
+  if (minutes < 60) {
+    return `Last received ${minutes}m ago`
+  }
+
+  const hours = Math.floor(minutes / 60)
+  return `Last received ${hours}h ago`
+})
+
 onMounted(async () => {
+  clockTimer = window.setInterval(() => {
+    currentTime.value = Date.now()
+  }, 1000)
+
   await sensorStore.fetchHistory()
   sensorStore.connectWebSocket()
 })
 
 onUnmounted(() => {
+  if (clockTimer != null) {
+    window.clearInterval(clockTimer)
+  }
+
   sensorStore.disconnectWebSocket()
 })
 </script>
@@ -40,9 +106,9 @@ onUnmounted(() => {
 
       <span
         class="connection"
-        :class="{ 'connection--online': isConnected }"
+        :class="{ 'connection--online': isSensorOnline }"
       >
-        {{ isConnected ? 'Live' : 'Disconnected' }}
+        {{ isSensorOnline ? 'Live' : 'Offline' }}
       </span>
     </header>
 
@@ -51,11 +117,22 @@ onUnmounted(() => {
       {{ errorMessage }}
     </p>
 
+    <div v-if="isTemperatureWarning" class="temperature-alert">
+      <strong>High temperature warning</strong>
+      <span>
+        CPU temperature is
+        {{ displayNumber(latestSensor?.temperature) }}°C.
+        The warning threshold is {{ TEMPERATURE_WARNING_CELSIUS }}°C.
+      </span>
+    </div>
+
     <section class="status-grid">
       <StatusCard
         label="CPU Temperature"
         :value="displayNumber(latestSensor?.temperature)"
         unit="°C"
+        :tone="isTemperatureWarning ? 'warning' : 'normal'"
+        :detail="isTemperatureWarning ? 'Threshold exceeded' : 'Normal range'"
       />
 
       <StatusCard
@@ -72,8 +149,9 @@ onUnmounted(() => {
 
       <StatusCard
         label="Online Status"
-        :value="isConnected ? 'Online' : 'Offline'"
-        :tone="isConnected ? 'online' : 'offline'"
+        :value="isSensorOnline ? 'Online' : 'Offline'"
+        :tone="isSensorOnline ? 'online' : 'offline'"
+        :detail="lastReceivedLabel"
       />
     </section>
 
@@ -137,6 +215,21 @@ onUnmounted(() => {
   background: #fee2e2;
 }
 
+.temperature-alert {
+  display: flex;
+  gap: 8px 16px;
+  align-items: center;
+  padding: 14px 16px;
+  border: 1px solid #fca5a5;
+  border-radius: 12px;
+  color: #991b1b;
+  background: #fff1f2;
+}
+
+.temperature-alert span {
+  font-size: 14px;
+}
+
 @media (max-width: 850px) {
   .status-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -146,6 +239,11 @@ onUnmounted(() => {
 @media (max-width: 520px) {
   .status-grid {
     grid-template-columns: 1fr;
+  }
+
+  .temperature-alert {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 </style>

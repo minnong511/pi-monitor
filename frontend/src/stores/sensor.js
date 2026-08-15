@@ -4,15 +4,18 @@ import { Client } from '@stomp/stompjs'
 
 import api from '@/services/api'
 
-const MAX_SENSOR_COUNT = 20
+const MAX_RECENT_SENSOR_COUNT = 20
+const HISTORY_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
 
 let stompClient = null
 
 export const useSensorStore = defineStore('sensor', () => {
   const sensors = ref([])
+  const sensorHistory = ref([])
   const isConnected = ref(false)
   const isLoading = ref(false)
   const errorMessage = ref('')
+  const knownSensorIds = new Set()
 
   const latestSensor = computed(() => {
     return sensors.value.at(-1) ?? null
@@ -24,14 +27,27 @@ export const useSensorStore = defineStore('sensor', () => {
 
     try {
       const response = await api.get('/api/sensors')
+      const cutoffTime = Date.now() - HISTORY_RETENTION_MS
 
       /*
-       * 백엔드는 최신순으로 반환합니다.
-       * 최근 20개를 선택한 후 시간 오름차순으로 뒤집습니다.
+       * 백엔드는 최신순으로 반환하므로 프론트에서는 시간 오름차순으로
+       * 보관합니다. 표에는 최근 20개만 사용하고 차트/CSV에는 전체 이력을
+       * 사용합니다.
        */
-      sensors.value = response.data
-        .slice(0, MAX_SENSOR_COUNT)
+      sensorHistory.value = response.data
+        .filter(
+          (sensor) => new Date(sensor.createdAt).getTime() >= cutoffTime,
+        )
         .reverse()
+
+      sensors.value = sensorHistory.value.slice(
+        -MAX_RECENT_SENSOR_COUNT,
+      )
+
+      knownSensorIds.clear()
+      sensorHistory.value.forEach((sensor) => {
+        knownSensorIds.add(sensor.id)
+      })
     } catch (error) {
       console.error(error)
       errorMessage.value = '과거 센서 데이터를 가져오지 못했습니다.'
@@ -41,21 +57,30 @@ export const useSensorStore = defineStore('sensor', () => {
   }
 
   function addSensor(sensorData) {
-    const alreadyExists = sensors.value.some(
-      (sensor) => sensor.id === sensorData.id,
-    )
-
-    if (alreadyExists) {
+    if (knownSensorIds.has(sensorData.id)) {
       return
     }
 
+    knownSensorIds.add(sensorData.id)
+    sensorHistory.value.push(sensorData)
     sensors.value.push(sensorData)
 
-    if (sensors.value.length > MAX_SENSOR_COUNT) {
+    if (sensors.value.length > MAX_RECENT_SENSOR_COUNT) {
       sensors.value.splice(
         0,
-        sensors.value.length - MAX_SENSOR_COUNT,
+        sensors.value.length - MAX_RECENT_SENSOR_COUNT,
       )
+    }
+
+    const cutoffTime = Date.now() - HISTORY_RETENTION_MS
+
+    while (
+      sensorHistory.value.length > 0
+      && new Date(sensorHistory.value[0].createdAt).getTime()
+        < cutoffTime
+    ) {
+      const removedSensor = sensorHistory.value.shift()
+      knownSensorIds.delete(removedSensor.id)
     }
   }
 
@@ -112,6 +137,7 @@ export const useSensorStore = defineStore('sensor', () => {
 
   return {
     sensors,
+    sensorHistory,
     latestSensor,
     isConnected,
     isLoading,
