@@ -5,52 +5,43 @@ import { Client } from '@stomp/stompjs'
 import api from '@/services/api'
 
 const MAX_RECENT_SENSOR_COUNT = 20
-const HISTORY_RETENTION_MS = 7 * 24 * 60 * 60 * 1000
 
 let stompClient = null
 
 export const useSensorStore = defineStore('sensor', () => {
   const sensors = ref([])
-  const sensorHistory = ref([])
   const isConnected = ref(false)
   const isLoading = ref(false)
   const errorMessage = ref('')
+  const sensorEventVersion = ref(0)
   const knownSensorIds = new Set()
 
-  const latestSensor = computed(() => {
-    return sensors.value.at(-1) ?? null
-  })
+  const latestSensor = computed(() => sensors.value.at(-1) ?? null)
 
-  async function fetchHistory() {
+  async function fetchRecent() {
     isLoading.value = true
     errorMessage.value = ''
 
     try {
-      const response = await api.get('/api/sensors')
-      const cutoffTime = Date.now() - HISTORY_RETENTION_MS
-
-      /*
-       * 백엔드는 최신순으로 반환하므로 프론트에서는 시간 오름차순으로
-       * 보관합니다. 표에는 최근 20개만 사용하고 차트/CSV에는 전체 이력을
-       * 사용합니다.
-       */
-      sensorHistory.value = response.data
-        .filter(
-          (sensor) => new Date(sensor.createdAt).getTime() >= cutoffTime,
-        )
-        .reverse()
-
-      sensors.value = sensorHistory.value.slice(
-        -MAX_RECENT_SENSOR_COUNT,
-      )
-
-      knownSensorIds.clear()
-      sensorHistory.value.forEach((sensor) => {
-        knownSensorIds.add(sensor.id)
+      const response = await api.get('/api/sensors/recent', {
+        params: { limit: MAX_RECENT_SENSOR_COUNT },
       })
+      const byId = new Map(sensors.value.map((sensor) => [sensor.id, sensor]))
+      response.data.forEach((sensor) => byId.set(sensor.id, sensor))
+      const recentSensors = [...byId.values()]
+        .sort((first, second) => (
+          new Date(first.createdAt).getTime() - new Date(second.createdAt).getTime()
+          || first.id - second.id
+        ))
+        .slice(-MAX_RECENT_SENSOR_COUNT)
+
+      sensors.value = recentSensors
+      knownSensorIds.clear()
+      recentSensors.forEach((sensor) => knownSensorIds.add(sensor.id))
+      sensorEventVersion.value += 1
     } catch (error) {
       console.error(error)
-      errorMessage.value = '과거 센서 데이터를 가져오지 못했습니다.'
+      errorMessage.value = '최근 센서 데이터를 가져오지 못했습니다.'
     } finally {
       isLoading.value = false
     }
@@ -62,26 +53,14 @@ export const useSensorStore = defineStore('sensor', () => {
     }
 
     knownSensorIds.add(sensorData.id)
-    sensorHistory.value.push(sensorData)
     sensors.value.push(sensorData)
 
     if (sensors.value.length > MAX_RECENT_SENSOR_COUNT) {
-      sensors.value.splice(
-        0,
-        sensors.value.length - MAX_RECENT_SENSOR_COUNT,
-      )
-    }
-
-    const cutoffTime = Date.now() - HISTORY_RETENTION_MS
-
-    while (
-      sensorHistory.value.length > 0
-      && new Date(sensorHistory.value[0].createdAt).getTime()
-        < cutoffTime
-    ) {
-      const removedSensor = sensorHistory.value.shift()
+      const removedSensor = sensors.value.shift()
       knownSensorIds.delete(removedSensor.id)
     }
+
+    sensorEventVersion.value += 1
   }
 
   function connectWebSocket() {
@@ -98,15 +77,14 @@ export const useSensorStore = defineStore('sensor', () => {
     stompClient.onConnect = () => {
       isConnected.value = true
       errorMessage.value = ''
-
       stompClient.subscribe('/topic/sensors', (message) => {
         try {
-          const sensorData = JSON.parse(message.body)
-          addSensor(sensorData)
+          addSensor(JSON.parse(message.body))
         } catch (error) {
           console.error('WebSocket JSON 변환 실패', error)
         }
       })
+      void fetchRecent()
     }
 
     stompClient.onWebSocketClose = () => {
@@ -137,12 +115,12 @@ export const useSensorStore = defineStore('sensor', () => {
 
   return {
     sensors,
-    sensorHistory,
     latestSensor,
     isConnected,
     isLoading,
     errorMessage,
-    fetchHistory,
+    sensorEventVersion,
+    fetchRecent,
     connectWebSocket,
     disconnectWebSocket,
   }

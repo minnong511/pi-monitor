@@ -83,7 +83,7 @@ onMounted(async () => {
     currentTime.value = Date.now()
   }, 1000)
 
-  await sensorStore.fetchHistory()
+  await sensorStore.fetchRecent()
   sensorStore.connectWebSocket()
 })
 
