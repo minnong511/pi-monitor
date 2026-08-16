@@ -29,6 +29,32 @@ Vercel Vue Dashboard
   → Raspberry Pi Spring Boot
 ```
 
+## 데이터 처리 로직 다이어그램
+
+```mermaid
+flowchart TD
+    A["센서 수집기<br/>5초마다 시스템 지표 수집"] --> B["POST /api/sensors"]
+    B --> C{"요청값이 유효한가?"}
+    C -- 아니요 --> D["오류 기록 후<br/>다음 주기에 재시도"]
+    C -- 예 --> E[("PostgreSQL 저장")]
+    E --> F["STOMP /topic/sensors 발행"]
+    E --> G["REST 조회 API"]
+
+    H["Vue Dashboard"] -->|"최초 recent 조회"| G
+    H -->|"최초 history/summary 조회"| G
+    H -->|"WebSocket 구독"| F
+    F --> I["Pinia Store<br/>id 기준 중복 제거"]
+    I --> J["상태 카드와 최근 표 즉시 갱신"]
+    I --> K{"현재 시간 구간을<br/>보고 있는가?"}
+    K -- 예 --> L["500ms 디바운스 후<br/>history/summary 재조회"]
+    L --> G
+    G --> M["통계와 차트 갱신<br/>고정 높이 · 무애니메이션"]
+    K -- 아니요 --> N["새 데이터 알림 표시"]
+
+    O["드래그 · 휠 · 핀치"] --> P["프런트에서 X축 확대"]
+    P --> Q["Shift + 드래그 이동<br/>Reset zoom으로 초기화"]
+```
+
 ## 작동 과정
 
 ### 1. Raspberry Pi가 센서 데이터를 수집
